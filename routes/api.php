@@ -17,6 +17,8 @@ Route::post('login', 'Api\UserController@login');
 Route::post('register', 'Api\UserController@register');
 Route::post('google_signin', 'Api\UserController@googleSignIn');
 Route::post('refresh_token', 'Api\UserController@refreshToken');
+Route::post('send_otp', 'Api\UserController@sendOtp');
+Route::post('verify_otp', 'Api\UserController@verifyOtp');
 
 Route::middleware('auth:api')->group(function () {
     Route::get('/validate-token', function () {

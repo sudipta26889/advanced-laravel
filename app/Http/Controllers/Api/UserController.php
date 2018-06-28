@@ -5,6 +5,7 @@ namespace App\Http\Controllers\Api;
 use Illuminate\Http\Request;
 use App\Http\Controllers\Api\ApiController;
 use App\Models\User;
+use App\Models\VerifyPhone;
 use Illuminate\Support\Facades\Auth;
 use Zend\Diactoros\ServerRequest;
 use Zend\Diactoros\Response;
@@ -200,7 +201,11 @@ class UserController extends ApiController
         // ]);
         // $a = $client->get('/api/validate-token')->getBody()->getContents();
         // dd($a);
-        
+        // $link = $request->getSchemeAndhttpHost()."/api/validate-token";
+        // $fp = fopen($link, "r");
+        // dd($fp);
+        // $response = stream_get_contents($fp);
+        // dd($response);
         return false;
     }
 
@@ -288,5 +293,116 @@ class UserController extends ApiController
             'refresh_token' => [$msg]
         );
         return parent::errorResponse($error, $msg, 'unauthorised');
+    }
+
+    public function sendOtp(Request $request) {
+        $data = null;
+        $msg = "";
+        $this->parseRequest($request);
+        $validator = Validator::make($request->all(), [
+            'phone' => 'required|integer|digits:10',
+            'phone_country_code' => 'required|integer|max:9999',
+            'entity_id' => 'required|integer|exists:entities,id',
+        ]);
+        $input = $request->all();
+        if ($validator->fails()) {
+            $msg = "Please check your inputs.";
+            $error = $validator->errors();
+            return parent::errorResponse($error, $msg, 'unauthorised');
+        }else{
+            $uname = env('SMSGATEWAY_UNAME', "inst-BBMHQ");
+            $pwd = env('SMSGATEWAY_PASSWD', "bbmhq123");
+            $sender = env('SMSGATEWAY_SENDER', "BBMDFO");
+            $to = $input['phone_country_code'].$input['phone'];
+            $message = "";
+            $whereField = [
+                'phone' => $input['phone'], 
+                'phone_country_code' => $input['phone_country_code'], 
+                'entity_id' => $input['entity_id']
+            ];
+            if (VerifyPhone::where($whereField)->exists()) {
+                $verifyPhone = VerifyPhone::where($whereField)->first();
+                if ($verifyPhone->phone_verified) {
+                    $msg = "Already Verified";
+                    $data['otp_sent_to'] = $to;
+                    $data['otp_message'] = $msg;
+                    return parent::successResponse($data, $msg, 'accepted');
+                }
+                $otp = $verifyPhone->otp;
+                $otpMessage = "Your ".$this->entity->name." Otp is ".$otp;
+                $message = urlencode($otpMessage);
+            }else{
+                $otp = rand ( 1000 , 9999 );
+                $otpMessage = "Your ".$this->entity->name." Otp is ".$otp;
+                $message = urlencode($otpMessage);
+
+                $verifyPhone = new VerifyPhone();
+                $verifyPhone->phone = $input['phone'];
+                $verifyPhone->phone_country_code = $input['phone_country_code'];
+                $verifyPhone->otp = $otp;
+                $verifyPhone->phone_verified = false;
+                $verifyPhone->entity_id = $input['entity_id'];
+                $verifyPhone->save();
+            }
+            $link = "http://103.16.101.52/sendsms/bulksms?username=".$uname."&password=".$pwd."&type=0&destination=".$to."&source=".$sender."&message=".$message;
+            $fp = fopen($link, "r");
+            $response = stream_get_contents($fp);
+            $data['otp_sent_to'] = $to;
+            $data['otp_message'] = $message;
+            $msg = "Otp Sent";
+            return parent::successResponse($data, $msg, 'accepted');
+        }
+    }
+
+    public function verifyOtp(Request $request) {
+        $data = null;
+        $msg = "";
+        $this->parseRequest($request);
+        $validator = Validator::make($request->all(), [
+            'phone' => 'required|integer|digits:10',
+            'phone_country_code' => 'required|integer|max:9999',
+            'otp' => 'required|integer|digits:4',
+            'entity_id' => 'required|integer|exists:entities,id',
+        ]);
+        $input = $request->all();
+        if ($validator->fails()) {
+            $msg = "Please check your inputs.";
+            $error = $validator->errors();
+            return parent::errorResponse($error, $msg, 'unauthorised');
+        }else{
+            $whereField = [
+                'phone' => $input['phone'], 
+                'phone_country_code' => $input['phone_country_code'], 
+                'otp' => $input['otp'], 
+                'entity_id' => $input['entity_id']
+            ];
+            if (VerifyPhone::where($whereField)->exists()) {
+                $verifyPhone = VerifyPhone::where($whereField)->first();
+                $verifyPhone->otp = '';
+                $verifyPhone->phone_verified = true;
+                $verifyPhone->save();
+                $data['phone'] = $input['phone'];
+                $data['phone_country_code'] = $input['phone_country_code'];
+                $data['phone_verified'] = $verifyPhone->phone_verified;
+                $msg = "Otp Verified";
+                $whereField = [
+                    'phone' => $input['phone'], 
+                    'phone_country_code' => $input['phone_country_code'], 
+                    'entity_id' => $input['entity_id']
+                ];
+                if (User::where($whereField)->exists()) {
+                    $user = User::where($whereField)->first();
+                    $user->phone_verified = true;
+                    $user->save();
+                }
+                return parent::successResponse($data, $msg, 'accepted');
+            }else{
+                $msg = "Otp didnot match. Can not verify phone number.";
+                $error = array(
+                    'refresh_token' => [$msg]
+                );
+                return parent::errorResponse($error, $msg, 'unauthorised');
+            }
+        }
     }
 }
